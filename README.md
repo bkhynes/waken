@@ -4,6 +4,8 @@ Still-to-motion studio in PHP. Drop a photo, pick a camera move, queue a clip, s
 
 Runs on your Mac. Open it from your iPhone on the same Wi-Fi.
 
+Frosted glass UI with four looks — Ice, Bloom, Lime, Violet — tap the swatches in the header.
+
 ## One-liner (2020 MacBook Pro)
 
 In Terminal:
@@ -23,6 +25,12 @@ Keep that Terminal window open. On the iPhone, Safari → the iPhone URL.
 
 ```bash
 ~/waken/setup.sh
+```
+
+If you already cloned it, pull then restart:
+
+```bash
+cd ~/waken && git pull && ~/waken/setup.sh
 ```
 
 ## Manual start
