@@ -100,6 +100,74 @@ if ($method === 'POST' && $path === '/api/poll') {
     ]);
 }
 
+if ($method === 'POST' && $path === '/api/prompt') {
+    $data = json_body();
+    $image = isset($data['imageDataUrl']) && is_string($data['imageDataUrl']) ? $data['imageDataUrl'] : '';
+    $presetId = isset($data['presetId']) && is_string($data['presetId']) ? $data['presetId'] : 'subtle';
+    if (!preg_match('#^data:image/(jpeg|png|webp);base64,#i', $image) || strlen($image) > 3_500_000) {
+        json_out(['ok' => false, 'error' => 'Still is missing or too large.'], 400);
+    }
+    $key = api_key();
+    if ($key === '') {
+        json_out(['ok' => false, 'error' => 'Add your xAI API key to .env first.']);
+    }
+
+    $styles = [
+        'subtle' => 'Subtle life — breath, blink, fabric',
+        'wind' => 'Wind — hair and cloth',
+        'look' => 'Look around — head and gaze',
+        'dolly-in' => 'Dolly in — slow push',
+        'dolly-out' => 'Dolly out — pull back',
+        'orbit' => 'Orbit — arc around',
+        'pan' => 'Pan — lateral move',
+        'handheld' => 'Handheld — lived-in shake',
+        'parallax' => 'Parallax — depth shift',
+        'sky' => 'Sky shift — light and cloud',
+    ];
+    $style = $styles[$presetId] ?? $styles['subtle'];
+    $instruction = implode(' ', [
+        'You write a short image-to-video director note from one still photograph.',
+        'Output only the note. No title, no quotes, no markdown. Two to four sentences, under 500 characters.',
+        'Name what is actually in the frame — setting, weather, light, and clothing as worn — then direct one camera move and one natural motion already suggested by the scene.',
+        'Keep the person, identity, wardrobe, and framing unchanged. Do not add people, text, logos, or new outfits.',
+        'Write in plain cinematic language that will pass a standard video-moderation filter.',
+        'Never request nudity, sexual activity, fetish content, romance involving anyone who could be under 18, graphic violence, weapons, drugs, or hate.',
+        'If the still is revealing, do not sexualize it and do not describe the body. Direct only hair, cloth, light, and camera.',
+        'Do not use the words nude, naked, sexy, erotic, sensual, lingerie, cleavage, or provocative. Rephrase anything risky into motion, light, and camera only.',
+    ]);
+    $models = ['grok-4.5', 'grok-4.7'];
+    $lastError = 'Could not read the still.';
+    foreach ($models as $model) {
+        $payload = [
+            'model' => $model,
+            'store' => false,
+            'input' => [
+                ['role' => 'system', 'content' => $instruction],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_image', 'image_url' => $image, 'detail' => 'low'],
+                        ['type' => 'input_text', 'text' => 'Selected motion style: ' . $style . '. Write director notes that support that style and stay specific to this still.'],
+                    ],
+                ],
+            ],
+        ];
+        $res = xai_request('POST', 'https://api.x.ai/v1/responses', $payload, 90);
+        if ($res['status'] >= 200 && $res['status'] < 300) {
+            $prompt = clean_note(extract_text($res['json']));
+            if ($prompt === '') {
+                json_out(['ok' => false, 'error' => "That still didn't yield a usable note. Try again."]);
+            }
+            json_out(['ok' => true, 'prompt' => $prompt]);
+        }
+        $lastError = extract_error($res['json'], 'Could not read the still (' . $res['status'] . ').');
+        if ($res['status'] !== 400 && $res['status'] !== 404) {
+            break;
+        }
+    }
+    json_out(['ok' => false, 'error' => $lastError]);
+}
+
 if ($method === 'GET' && $path === '/api/clip') {
     $src = isset($_GET['src']) && is_string($_GET['src']) ? $_GET['src'] : '';
     $name = safe_filename(isset($_GET['name']) && is_string($_GET['name']) ? $_GET['name'] : 'waken-clip.mp4');
@@ -213,7 +281,7 @@ function extract_error($payload, string $fallback): string
     return $fallback;
 }
 
-function xai_request(string $method, string $url, ?array $body): array
+function xai_request(string $method, string $url, ?array $body, int $timeout = 60): array
 {
     $key = api_key();
     $ch = curl_init($url);
@@ -226,7 +294,7 @@ function xai_request(string $method, string $url, ?array $body): array
         CURLOPT_CUSTOMREQUEST => $method,
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 60,
+        CURLOPT_TIMEOUT => $timeout,
         CURLOPT_FOLLOWLOCATION => false,
     ]);
     $raw = curl_exec($ch);
@@ -238,6 +306,57 @@ function xai_request(string $method, string $url, ?array $body): array
         $json = is_array($decoded) ? $decoded : ['message' => substr($raw, 0, 240)];
     }
     return ['status' => $status, 'json' => $json];
+}
+
+function clean_note(string $raw): string
+{
+    $text = trim((string) preg_replace('/\s+/', ' ', $raw));
+    $text = trim($text, " \t\n\r\0\x0B\"'`");
+    $banned = '/\b(nude|nudes|naked|nudity|sex|sexual|sexy|erotic|erotica|sensual|lingerie|cleavage|nipples?|breasts?|porn|fetish|orgasm|undress|striptease|provocative|seductive)\b/i';
+    $parts = preg_split('/(?<=[.!?])\s+/', $text) ?: [];
+    $kept = [];
+    foreach ($parts as $part) {
+        $part = trim($part);
+        if ($part !== '' && !preg_match($banned, $part)) {
+            $kept[] = $part;
+        }
+    }
+    $text = trim(implode(' ', $kept));
+    if (strlen($text) < 20 || preg_match($banned, $text)) {
+        return '';
+    }
+    return strlen($text) > 800 ? substr($text, 0, 800) : $text;
+}
+
+function extract_text($payload): string
+{
+    if (!is_array($payload)) {
+        return '';
+    }
+    $chunks = [];
+    if (isset($payload['output']) && is_array($payload['output'])) {
+        foreach ($payload['output'] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $content = $item['content'] ?? null;
+            if (is_string($content)) {
+                $chunks[] = $content;
+            }
+            if (is_array($content)) {
+                foreach ($content as $part) {
+                    if (is_array($part) && isset($part['text']) && is_string($part['text'])) {
+                        $chunks[] = $part['text'];
+                    }
+                }
+            }
+        }
+    }
+    $choice = $payload['choices'][0]['message']['content'] ?? null;
+    if (is_string($choice)) {
+        $chunks[] = $choice;
+    }
+    return trim(implode(' ', $chunks));
 }
 
 function safe_filename(string $raw): string

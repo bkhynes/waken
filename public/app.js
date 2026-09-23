@@ -11,12 +11,6 @@
     { id: "parallax", label: "Parallax", prompt: "A gentle parallax move: foreground and background shift at different speeds while the subject stays centered. Cinematic, photoreal." },
     { id: "sky", label: "Sky shift", prompt: "The subject stays still. Clouds drift and the light on the scene slowly changes. Camera locked. Photoreal time-lapse feel without speeding the subject." },
   ];
-  const THEMES = [
-    { id: "ice", label: "Ice", hint: "Cool Apple glass" },
-    { id: "bloom", label: "Bloom", hint: "Hot pink" },
-    { id: "lime", label: "Lime", hint: "Electric citrus" },
-    { id: "violet", label: "Violet", hint: "Night iridescent" },
-  ];
   const INTENSITY = {
     subtle: "Keep motion very restrained — almost a living photograph. No large gestures.",
     medium: "Clear, readable motion. Enough movement to feel alive without becoming chaotic.",
@@ -33,10 +27,10 @@
     intensity: "medium",
     duration: 6,
     resolution: "720p",
-    theme: "ice",
     currentJob: null,
     history: [],
     aiAvailable: null,
+    writing: false,
   };
 
   function toast(msg) {
@@ -56,7 +50,6 @@
         intensity: state.intensity,
         duration: state.duration,
         resolution: state.resolution,
-        theme: state.theme,
         currentJob: state.currentJob,
         history: state.history.slice(0, 12),
       }),
@@ -66,28 +59,17 @@
   function load() {
     try {
       const raw = JSON.parse(localStorage.getItem(STORE) || "{}");
-      const themeOk = THEMES.some((t) => t.id === raw.theme);
       Object.assign(state, {
         presetId: raw.presetId || "subtle",
         extraPrompt: raw.extraPrompt || "",
         intensity: raw.intensity || "medium",
         duration: raw.duration || 6,
         resolution: raw.resolution || "720p",
-        theme: themeOk ? raw.theme : "ice",
         currentJob: raw.currentJob || null,
         history: Array.isArray(raw.history) ? raw.history : [],
       });
     } catch {
       /* ignore */
-    }
-  }
-
-  function applyTheme() {
-    document.documentElement.dataset.theme = state.theme;
-    const meta = $("theme-color");
-    if (meta) {
-      const color = getComputedStyle(document.documentElement).getPropertyValue("--theme-color").trim();
-      if (color) meta.setAttribute("content", color);
     }
   }
 
@@ -168,9 +150,9 @@
   }
 
   function render() {
-    applyTheme();
     const job = state.currentJob;
     const videoUrl = job && job.status === "done" && job.videoUrl ? job.videoUrl : null;
+    $("meta").textContent = state.source ? state.source.width + "×" + state.source.height : "No still";
     $("empty").classList.toggle("hidden", Boolean(state.source || videoUrl));
     $("still").classList.toggle("hidden", Boolean(videoUrl) || !state.source);
     $("player").classList.toggle("hidden", !videoUrl);
@@ -199,6 +181,8 @@
     $("replace").classList.toggle("hidden", !(state.source || videoUrl) || busy());
     $("queue").disabled = !state.source || busy() || state.aiAvailable === false;
     $("queue").textContent = busy() ? "In queue" : "Queue clip";
+    $("write").disabled = !state.source || state.writing || state.aiAvailable === false;
+    $("write").textContent = state.writing ? "Reading still" : "Write from still";
     $("ai-note").classList.toggle("hidden", state.aiAvailable !== false);
     $("notes").value = state.extraPrompt;
     document.querySelectorAll("#presets .chip").forEach((el) => {
@@ -212,9 +196,6 @@
     });
     document.querySelectorAll("#resolution button").forEach((el) => {
       el.setAttribute("aria-checked", el.dataset.v === state.resolution ? "true" : "false");
-    });
-    document.querySelectorAll("#themes .theme-btn").forEach((el) => {
-      el.setAttribute("aria-checked", el.dataset.id === state.theme ? "true" : "false");
     });
     const thumbs = $("thumbs");
     $("roll").classList.toggle("hidden", state.history.length === 0);
@@ -383,22 +364,6 @@
   }
 
   load();
-  applyTheme();
-  THEMES.forEach((t) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "theme-btn";
-    b.setAttribute("role", "radio");
-    b.dataset.id = t.id;
-    b.title = t.label + " — " + t.hint;
-    b.innerHTML = '<span class="theme-dot ' + t.id + '" aria-hidden="true"></span><span class="theme-label">' + t.label + "</span>";
-    b.addEventListener("click", () => {
-      state.theme = t.id;
-      save();
-      render();
-    });
-    $("themes").appendChild(b);
-  });
   segs($("intensity"), [["subtle", "Soft"], ["medium", "Medium"], ["strong", "Strong"]], "intensity");
   segs($("duration"), [[6, "6s"], [10, "10s"], [15, "15s"]], "duration");
   segs($("resolution"), [["480p", "Draft"], ["720p", "Standard"], ["1080p", "High"]], "resolution");
@@ -435,7 +400,37 @@
       toast("Could not load the sample still.");
     }
   });
+  async function writeFromStill() {
+    if (!state.source || state.writing) return;
+    state.writing = true;
+    render();
+    try {
+      const res = await fetch("/api/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageDataUrl: state.source.dataUrl,
+          presetId: state.presetId,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        toast(data.error || "Could not read the still.");
+        return;
+      }
+      state.extraPrompt = data.prompt;
+      save();
+      toast("Director notes written from the still.");
+    } catch {
+      toast("Could not read the still.");
+    } finally {
+      state.writing = false;
+      render();
+    }
+  }
+
   $("queue").addEventListener("click", () => void queueClip());
+  $("write").addEventListener("click", () => void writeFromStill());
   const frame = $("frame");
   frame.addEventListener("dragover", (e) => {
     e.preventDefault();
