@@ -1,6 +1,6 @@
 # Waken
 
-Still-to-motion studio in PHP. Drop a photo, pick a camera move, or tap **Write from still** to draft director notes from the photo. Queue a clip, then save an MP4.
+Still-to-motion studio in PHP. Drop a photo, pick a camera move, tap **Write from still** to draft director notes, or **Enhance note** to elaborate the line you already wrote. Queue a clip, then save an MP4.
 
 Runs on your Mac. Open it from your iPhone on the same Wi-Fi.
 

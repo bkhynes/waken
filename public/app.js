@@ -30,7 +30,7 @@
     currentJob: null,
     history: [],
     aiAvailable: null,
-    writing: false,
+    writing: "",
   };
 
   function toast(msg) {
@@ -182,7 +182,9 @@
     $("queue").disabled = !state.source || busy() || state.aiAvailable === false;
     $("queue").textContent = busy() ? "In queue" : "Queue clip";
     $("write").disabled = !state.source || state.writing || state.aiAvailable === false;
-    $("write").textContent = state.writing ? "Reading still" : "Write from still";
+    $("write").textContent = state.writing === "write" ? "Reading still" : "Write from still";
+    $("enhance").disabled = !state.source || state.extraPrompt.trim().length < 3 || state.writing || state.aiAvailable === false;
+    $("enhance").textContent = state.writing === "enhance" ? "Enhancing" : "Enhance note";
     $("ai-note").classList.toggle("hidden", state.aiAvailable !== false);
     $("notes").value = state.extraPrompt;
     document.querySelectorAll("#presets .chip").forEach((el) => {
@@ -400,9 +402,14 @@
       toast("Could not load the sample still.");
     }
   });
-  async function writeFromStill() {
+  async function draftNotes(mode) {
     if (!state.source || state.writing) return;
-    state.writing = true;
+    const notes = state.extraPrompt.trim();
+    if (mode === "enhance" && notes.length < 3) {
+      toast("Add a note first, then enhance it.");
+      return;
+    }
+    state.writing = mode;
     render();
     try {
       const res = await fetch("/api/prompt", {
@@ -411,26 +418,29 @@
         body: JSON.stringify({
           imageDataUrl: state.source.dataUrl,
           presetId: state.presetId,
+          mode,
+          notes,
         }),
       });
       const data = await res.json();
       if (!data.ok) {
-        toast(data.error || "Could not read the still.");
+        toast(data.error || (mode === "enhance" ? "Could not enhance the note." : "Could not read the still."));
         return;
       }
       state.extraPrompt = data.prompt;
       save();
-      toast("Director notes written from the still.");
+      toast(mode === "enhance" ? "Notes enhanced." : "Director notes written from the still.");
     } catch {
-      toast("Could not read the still.");
+      toast(mode === "enhance" ? "Could not enhance the note." : "Could not read the still.");
     } finally {
-      state.writing = false;
+      state.writing = "";
       render();
     }
   }
 
   $("queue").addEventListener("click", () => void queueClip());
-  $("write").addEventListener("click", () => void writeFromStill());
+  $("write").addEventListener("click", () => void draftNotes("write"));
+  $("enhance").addEventListener("click", () => void draftNotes("enhance"));
   const frame = $("frame");
   frame.addEventListener("dragover", (e) => {
     e.preventDefault();
