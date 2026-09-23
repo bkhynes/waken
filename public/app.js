@@ -17,6 +17,10 @@
     strong: "Confident, obvious motion and camera energy. Still keep identity and wardrobe intact.",
   };
   const ASPECTS = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1, "4:3": 4 / 3, "3:4": 3 / 4, "3:2": 3 / 2, "2:3": 2 / 3 };
+  const MODELS = [
+    { id: "grok-imagine-video-1.5", resolutions: ["480p", "720p", "1080p"] },
+    { id: "grok-imagine-video", resolutions: ["480p", "720p"] },
+  ];
   const STORE = "waken-php";
 
   const $ = (id) => document.getElementById(id);
@@ -27,6 +31,7 @@
     intensity: "medium",
     duration: 6,
     resolution: "720p",
+    modelId: "grok-imagine-video-1.5",
     currentJob: null,
     history: [],
     aiAvailable: null,
@@ -50,6 +55,7 @@
         intensity: state.intensity,
         duration: state.duration,
         resolution: state.resolution,
+        modelId: state.modelId,
         currentJob: state.currentJob,
         history: state.history.slice(0, 12),
       }),
@@ -65,6 +71,7 @@
         intensity: raw.intensity || "medium",
         duration: raw.duration || 6,
         resolution: raw.resolution || "720p",
+        modelId: MODELS.some((m) => m.id === raw.modelId) ? raw.modelId : "grok-imagine-video-1.5",
         currentJob: raw.currentJob || null,
         history: Array.isArray(raw.history) ? raw.history : [],
       });
@@ -185,6 +192,13 @@
     $("write").textContent = state.writing === "write" ? "Reading still" : "Write from still";
     $("enhance").disabled = !state.source || state.extraPrompt.trim().length < 3 || state.writing || state.aiAvailable === false;
     $("enhance").textContent = state.writing === "enhance" ? "Enhancing" : "Enhance note";
+    const model = MODELS.find((m) => m.id === state.modelId) || MODELS[0];
+    if ($("model")) $("model").value = model.id;
+    document.querySelectorAll("#resolution button").forEach((el) => {
+      const allowed = model.resolutions.includes(el.dataset.v);
+      el.hidden = !allowed;
+      el.disabled = !allowed;
+    });
     $("ai-note").classList.toggle("hidden", state.aiAvailable !== false);
     $("notes").value = state.extraPrompt;
     document.querySelectorAll("#presets .chip").forEach((el) => {
@@ -270,6 +284,7 @@
       duration: state.duration,
       resolution: state.resolution,
       aspectRatio: state.source.aspect,
+      model: state.modelId,
       sourceThumb: state.source.thumbUrl,
       videoUrl: null,
       createdAt: Date.now(),
@@ -287,6 +302,7 @@
         duration: job.duration,
         resolution: job.resolution,
         aspectRatio: job.aspectRatio,
+        model: job.model,
       }),
     });
     const data = await res.json();
@@ -385,6 +401,13 @@
   $("notes").addEventListener("input", (e) => {
     state.extraPrompt = e.target.value;
     save();
+  });
+  $("model").addEventListener("change", (e) => {
+    state.modelId = e.target.value;
+    const model = MODELS.find((m) => m.id === state.modelId) || MODELS[0];
+    if (!model.resolutions.includes(state.resolution)) state.resolution = "720p";
+    save();
+    render();
   });
   $("choose").addEventListener("click", () => $("file").click());
   $("replace").addEventListener("click", () => $("file").click());

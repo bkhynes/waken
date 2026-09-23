@@ -78,6 +78,14 @@
             <button type="button" class="btn secondary full" id="write" disabled>Write from still</button>
             <button type="button" class="btn secondary full" id="enhance" disabled>Enhance note</button>
             <p class="hint">Write drafts from the photo. Enhance expands the note you already have, still inside the video filter.</p>
+            <label>
+              <span class="kicker">Model</span>
+              <select id="model" aria-label="Video model">
+                <option value="grok-imagine-video-1.5">Imagine 1.5 — best motion</option>
+                <option value="grok-imagine-video">Imagine — lower cost</option>
+              </select>
+            </label>
+            <p class="hint">Both use your xAI key. Wan is not listed — it is not free to call from here, and this Mac cannot run it.</p>
             <div>
               <p class="kicker">Intensity</p>
               <div class="seg" role="radiogroup" aria-label="Motion intensity" id="intensity"></div>

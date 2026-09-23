@@ -17,6 +17,7 @@ if ($method === 'POST' && $path === '/api/start') {
     $duration = isset($data['duration']) ? (int) $data['duration'] : 6;
     $resolution = isset($data['resolution']) && is_string($data['resolution']) ? $data['resolution'] : '720p';
     $aspect = isset($data['aspectRatio']) && is_string($data['aspectRatio']) ? $data['aspectRatio'] : '16:9';
+    $model = isset($data['model']) && is_string($data['model']) ? $data['model'] : 'grok-imagine-video-1.5';
 
     if (strlen($image) < 32 || strlen($image) > 3_500_000) {
         json_out(['ok' => false, 'error' => 'Still is missing or too large.'], 400);
@@ -33,6 +34,12 @@ if ($method === 'POST' && $path === '/api/start') {
     if (!in_array($aspect, ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'], true)) {
         json_out(['ok' => false, 'error' => 'Aspect is invalid.'], 400);
     }
+    if (!in_array($model, ['grok-imagine-video-1.5', 'grok-imagine-video'], true)) {
+        json_out(['ok' => false, 'error' => 'That model is not available. Wan is not free to call from this studio.'], 400);
+    }
+    if ($model === 'grok-imagine-video' && $resolution === '1080p') {
+        $resolution = '720p';
+    }
 
     $key = api_key();
     if ($key === '') {
@@ -40,7 +47,7 @@ if ($method === 'POST' && $path === '/api/start') {
     }
 
     $payload = [
-        'model' => 'grok-imagine-video-1.5',
+        'model' => $model,
         'prompt' => $prompt,
         'image' => ['url' => $image],
         'duration' => $duration,
