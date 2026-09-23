@@ -75,6 +75,15 @@
         currentJob: raw.currentJob || null,
         history: Array.isArray(raw.history) ? raw.history : [],
       });
+      const open = state.currentJob;
+      if (open && (open.status === "queued" || open.status === "rendering")) {
+        open.status = "failed";
+        open.error = "Stopped when the studio reopened.";
+        open.progress = 0;
+        state.history = state.history.map((item) => (item.id === open.id ? open : item));
+        state.currentJob = null;
+        save();
+      }
     } catch {
       /* ignore */
     }
@@ -151,6 +160,8 @@
     return "/api/clip?" + params.toString();
   }
 
+  let pollToken = 0;
+
   function busy() {
     const j = state.currentJob;
     return j && (j.status === "queued" || j.status === "rendering");
@@ -186,8 +197,13 @@
       $("clip-btn").href = download;
     }
     $("replace").classList.toggle("hidden", !(state.source || videoUrl) || busy());
-    $("queue").disabled = !state.source || busy() || state.aiAvailable === false;
-    $("queue").textContent = busy() ? "In queue" : "Queue clip";
+    if (busy()) {
+      $("queue").disabled = false;
+      $("queue").textContent = "Cancel";
+    } else {
+      $("queue").disabled = !state.source || state.aiAvailable === false;
+      $("queue").textContent = "Queue clip";
+    }
     $("write").disabled = !state.source || state.writing || state.aiAvailable === false;
     $("write").textContent = state.writing === "write" ? "Reading still" : "Write from still";
     $("enhance").disabled = !state.source || state.extraPrompt.trim().length < 3 || state.writing || state.aiAvailable === false;
@@ -306,6 +322,7 @@
       }),
     });
     const data = await res.json();
+    if (state.currentJob !== job || job.status === "failed") return;
     if (!data.ok) {
       job.status = "failed";
       job.error = data.error;
@@ -322,8 +339,22 @@
     poll(job.id, data.requestId);
   }
 
+  function cancelClip() {
+    pollToken += 1;
+    const job = state.currentJob;
+    if (!job || (job.status !== "queued" && job.status !== "rendering")) return;
+    job.status = "failed";
+    job.error = "Cancelled.";
+    job.progress = 0;
+    save();
+    render();
+    toast("Clip cancelled. You can queue another.");
+  }
+
   async function poll(jobId, requestId) {
+    const token = ++pollToken;
     const tick = async () => {
+      if (token !== pollToken) return;
       const job = state.currentJob;
       if (!job || job.id !== jobId) return;
       if (job.status === "done" || job.status === "failed") return;
@@ -333,6 +364,9 @@
         body: JSON.stringify({ requestId }),
       });
       const data = await res.json();
+      if (token !== pollToken) return;
+      const live = state.currentJob;
+      if (!live || live.id !== jobId || live.status === "failed" || live.status === "done") return;
       if (!data.ok) {
         job.status = "failed";
         job.error = data.error;
@@ -461,7 +495,11 @@
     }
   }
 
-  $("queue").addEventListener("click", () => void queueClip());
+  $("queue").addEventListener("click", () => {
+    if (busy()) cancelClip();
+    else void queueClip();
+  });
+  $("cancel").addEventListener("click", () => cancelClip());
   $("write").addEventListener("click", () => void draftNotes("write"));
   $("enhance").addEventListener("click", () => void draftNotes("enhance"));
   const frame = $("frame");
@@ -502,8 +540,5 @@
       render();
     });
 
-  if (state.currentJob && state.currentJob.requestId && (state.currentJob.status === "queued" || state.currentJob.status === "rendering")) {
-    poll(state.currentJob.id, state.currentJob.requestId);
-  }
   render();
 })();
